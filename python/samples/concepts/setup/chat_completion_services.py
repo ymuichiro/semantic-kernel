@@ -151,9 +151,19 @@ def get_azure_ai_inference_chat_completion_service_and_request_settings(
         AzureAIInferenceChatPromptExecutionSettings,
     )
 
+    # The AI model ID is used as an identifier for developers when they are using serverless endpoints
+    # on AI Foundry. It is not actually used to identify the model in the service as the endpoint points
+    # to only one model.
+    # When developers are using one endpoint that can route to multiple models, the `ai_model_id` will be
+    # used to identify the model. To use the latest routing feature on AI Foundry, please refer to the
+    # following documentation:
+    # https://learn.microsoft.com/en-us/azure/ai-services/multi-service-resource?%3Fcontext=%2Fazure%2Fai-services%2Fmodel-inference%2Fcontext%2Fcontext&pivots=azportal
+    # https://learn.microsoft.com/en-us/azure/ai-foundry/model-inference/how-to/configure-project-connection?pivots=ai-foundry-portal
+    # https://learn.microsoft.com/en-us/azure/ai-foundry/model-inference/how-to/inference?tabs=python
+
     chat_service = AzureAIInferenceChatCompletion(
         service_id=service_id,
-        ai_model_id="id",  # The model ID is simply an identifier as the model id cannot be obtained programmatically.
+        ai_model_id="id",
         instruction_role=instruction_role,
     )
     request_settings = AzureAIInferenceChatPromptExecutionSettings(service_id=service_id)
@@ -188,7 +198,7 @@ def get_anthropic_chat_completion_service_and_request_settings() -> tuple[
 def get_bedrock_chat_completion_service_and_request_settings() -> tuple[
     "ChatCompletionClientBase", "PromptExecutionSettings"
 ]:
-    """Return Anthropic chat completion service and request settings.
+    """Return Bedrock chat completion service and request settings.
 
     The service credentials can be read by 3 ways:
     1. Via the constructor
@@ -203,15 +213,14 @@ def get_bedrock_chat_completion_service_and_request_settings() -> tuple[
     """
     from semantic_kernel.connectors.ai.bedrock import BedrockChatCompletion, BedrockChatPromptExecutionSettings
 
-    chat_service = BedrockChatCompletion(service_id=service_id, model_id="cohere.command-r-v1:0")
+    chat_service = BedrockChatCompletion(service_id=service_id, model_id="anthropic.claude-3-sonnet-20240229-v1:0")
     request_settings = BedrockChatPromptExecutionSettings(
         # For model specific settings, specify them in the extension_data dictionary.
         # For example, for Cohere Command specific settings, refer to:
-        # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-cohere-command-r-plus.html
+        # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages.html
         service_id=service_id,
         extension_data={
-            "presence_penalty": 0.5,
-            "seed": 5,
+            "temperature": 0.8,
         },
     )
 

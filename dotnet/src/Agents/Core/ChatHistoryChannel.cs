@@ -1,6 +1,7 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -13,8 +14,9 @@ using Microsoft.SemanticKernel.ChatCompletion;
 namespace Microsoft.SemanticKernel.Agents;
 
 /// <summary>
-/// A <see cref="AgentChannel"/> specialization for that acts upon a <see cref="ChatHistoryKernelAgent"/>.
+/// Represents an <see cref="AgentChannel"/> specialization that acts upon a <see cref="ChatHistoryKernelAgent"/>.
 /// </summary>
+[Experimental("SKEXP0110")]
 internal sealed class ChatHistoryChannel : AgentChannel
 {
     // Supported content types for <see cref="ReceiveAsync"/> when

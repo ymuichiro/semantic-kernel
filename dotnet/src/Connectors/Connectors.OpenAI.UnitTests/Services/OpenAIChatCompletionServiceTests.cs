@@ -2,6 +2,7 @@
 
 using System;
 using System.ClientModel;
+using System.ClientModel.Primitives;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -590,6 +591,48 @@ public sealed class OpenAIChatCompletionServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetChatMessageContentsUsesDeveloperPromptAndSettingsCorrectlyAsync()
+    {
+        // Arrange
+        const string Prompt = "This is test prompt";
+        const string DeveloperMessage = "This is test system message";
+
+        var service = new OpenAIChatCompletionService("model-id", "api-key", httpClient: this._httpClient);
+        var settings = new OpenAIPromptExecutionSettings() { ChatDeveloperPrompt = DeveloperMessage };
+
+        this._messageHandlerStub.ResponseToReturn = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(File.ReadAllText("TestData/chat_completion_test_response.json"))
+        };
+
+        IKernelBuilder builder = Kernel.CreateBuilder();
+        builder.Services.AddTransient<IChatCompletionService>((sp) => service);
+        Kernel kernel = builder.Build();
+
+        // Act
+        var result = await kernel.InvokePromptAsync(Prompt, new(settings));
+
+        // Assert
+        Assert.Equal("Test chat response", result.ToString());
+
+        var requestContentByteArray = this._messageHandlerStub.RequestContent;
+
+        Assert.NotNull(requestContentByteArray);
+
+        var requestContent = JsonSerializer.Deserialize<JsonElement>(Encoding.UTF8.GetString(requestContentByteArray));
+
+        var messages = requestContent.GetProperty("messages");
+
+        Assert.Equal(2, messages.GetArrayLength());
+
+        Assert.Equal(DeveloperMessage, messages[0].GetProperty("content").GetString());
+        Assert.Equal("developer", messages[0].GetProperty("role").GetString());
+
+        Assert.Equal(Prompt, messages[1].GetProperty("content").GetString());
+        Assert.Equal("user", messages[1].GetProperty("role").GetString());
+    }
+
+    [Fact]
     public async Task GetChatMessageContentsWithChatMessageContentItemCollectionAndSettingsCorrectlyAsync()
     {
         // Arrange
@@ -960,6 +1003,65 @@ public sealed class OpenAIChatCompletionServiceTests : IDisposable
 
         // Assert
         Assert.NotNull(result);
+    }
+
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("string", "low")]
+    [InlineData("string", "medium")]
+    [InlineData("string", "high")]
+    [InlineData("ChatReasonEffortLevel.Low", "low")]
+    [InlineData("ChatReasonEffortLevel.Medium", "medium")]
+    [InlineData("ChatReasonEffortLevel.High", "high")]
+    public async Task GetChatMessageInReasoningEffortAsync(string? effortType, string? expectedEffortLevel)
+    {
+        // Assert
+        object? reasoningEffortObject = null;
+        switch (effortType)
+        {
+            case "string":
+                reasoningEffortObject = expectedEffortLevel;
+                break;
+            case "ChatReasonEffortLevel.Low":
+                reasoningEffortObject = ChatReasoningEffortLevel.Low;
+                break;
+            case "ChatReasonEffortLevel.Medium":
+                reasoningEffortObject = ChatReasoningEffortLevel.Medium;
+                break;
+            case "ChatReasonEffortLevel.High":
+                reasoningEffortObject = ChatReasoningEffortLevel.High;
+                break;
+        }
+
+        var modelId = "o1";
+        var sut = new OpenAIChatCompletionService(modelId, "apiKey", httpClient: this._httpClient);
+        OpenAIPromptExecutionSettings executionSettings = new() { ReasoningEffort = reasoningEffortObject };
+
+        this._messageHandlerStub.ResponseToReturn = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(File.ReadAllText("TestData/chat_completion_test_response.json"))
+        };
+
+        // Act
+        var result = await sut.GetChatMessageContentAsync(this._chatHistoryForTest, executionSettings);
+
+        // Assert
+        Assert.NotNull(result);
+
+        var actualRequestContent = Encoding.UTF8.GetString(this._messageHandlerStub.RequestContent!);
+        Assert.NotNull(actualRequestContent);
+
+        var optionsJson = JsonSerializer.Deserialize<JsonElement>(actualRequestContent);
+
+        if (expectedEffortLevel is null)
+        {
+            Assert.False(optionsJson.TryGetProperty("reasoning_effort", out _));
+            return;
+        }
+
+        var requestedReasoningEffort = optionsJson.GetProperty("reasoning_effort").GetString();
+
+        Assert.Equal(expectedEffortLevel, requestedReasoningEffort);
     }
 
     [Fact(Skip = "Not working running in the console")]
@@ -1558,6 +1660,76 @@ public sealed class OpenAIChatCompletionServiceTests : IDisposable
 
         Assert.Equal(string.Empty, assistantMessageContent);
     }
+
+    [Theory]
+    [MemberData(nameof(WebSearchOptionsData))]
+    public async Task ItCreatesCorrectWebSearchOptionsAsync(object webSearchOptions, string expectedJson)
+    {
+        // Arrange
+        var chatCompletion = new OpenAIChatCompletionService(modelId: "gpt-3.5-turbo", apiKey: "NOKEY", httpClient: this._httpClient);
+        this._messageHandlerStub.ResponseToReturn = new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+        { Content = new StringContent(ChatCompletionResponse) };
+
+        var settings = new OpenAIPromptExecutionSettings
+        {
+            WebSearchOptions = webSearchOptions
+        };
+
+        // Act
+        await chatCompletion.GetChatMessageContentsAsync(this._chatHistoryForTest, settings);
+
+        // Assert
+        var actualRequestContent = Encoding.UTF8.GetString(this._messageHandlerStub.RequestContent!);
+        Assert.NotNull(actualRequestContent);
+        var optionsJson = JsonSerializer.Deserialize<JsonElement>(actualRequestContent);
+        Assert.True(optionsJson.TryGetProperty("web_search_options", out var property));
+        Assert.Equal(JsonValueKind.Object, property.ValueKind);
+        Assert.Equal(expectedJson, property.GetRawText());
+    }
+
+    [Theory]
+    [MemberData(nameof(WebSearchOptionsData))]
+    public async Task ItCreatesCorrectWebSearchOptionsStreamingAsync(object webSearchOptions, string expectedJson)
+    {
+        // Arrange
+        var chatCompletion = new OpenAIChatCompletionService(modelId: "gpt-3.5-turbo", apiKey: "NOKEY", httpClient: this._httpClient);
+        using var stream = File.OpenRead("TestData/chat_completion_streaming_test_response.txt");
+
+        this._messageHandlerStub.ResponseToReturn = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(stream)
+        };
+
+        var settings = new OpenAIPromptExecutionSettings
+        {
+            WebSearchOptions = webSearchOptions
+        };
+
+        // Act
+        var asyncEnumerable = chatCompletion.GetStreamingChatMessageContentsAsync(this._chatHistoryForTest, settings);
+        await asyncEnumerable.GetAsyncEnumerator().MoveNextAsync();
+
+        // Assert
+        var actualRequestContent = Encoding.UTF8.GetString(this._messageHandlerStub.RequestContent!);
+        Assert.NotNull(actualRequestContent);
+        var optionsJson = JsonSerializer.Deserialize<JsonElement>(actualRequestContent);
+        Assert.True(optionsJson.TryGetProperty("web_search_options", out var property));
+        Assert.Equal(JsonValueKind.Object, property.ValueKind);
+        Assert.Equal(expectedJson, property.GetRawText());
+    }
+
+    public static TheoryData<object, string> WebSearchOptionsData => new()
+    {
+        { new ChatWebSearchOptions(), "{}" },
+        { JsonSerializer.Deserialize<JsonElement>("{}"), "{}" },
+        { "{}", "{}" },
+        { """{"user_location":{"type":"approximate","approximate":{"country":"GB","city":"London","region":"London"}}}""",
+          """{"user_location":{"type":"approximate","approximate":{"country":"GB","region":"London","city":"London"}}}""" },
+        { JsonSerializer.Deserialize<JsonElement>("""{"user_location":{"type":"approximate","approximate":{"country":"GB","city":"London","region":"London"}}}"""),
+          """{"user_location":{"type":"approximate","approximate":{"country":"GB","region":"London","city":"London"}}}""" },
+        { ModelReaderWriter.Read<ChatWebSearchOptions>(BinaryData.FromString("""{"user_location":{"type":"approximate","approximate":{"country":"GB","city":"London","region":"London"}}}"""))!,
+          """{"user_location":{"type":"approximate","approximate":{"country":"GB","region":"London","city":"London"}}}""" },
+    };
 
     public void Dispose()
     {
