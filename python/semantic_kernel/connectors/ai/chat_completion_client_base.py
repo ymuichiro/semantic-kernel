@@ -86,6 +86,8 @@ class ChatCompletionClientBase(AIServiceClientBase, ABC):
         self,
         chat_history: "ChatHistory",
         settings: "PromptExecutionSettings",
+        step_prompt: str | None = None,
+        final_prompt: str | None = None,
         **kwargs: Any,
     ) -> list["ChatMessageContent"]:
         """Create chat message contents, in the number specified by the settings.
@@ -94,6 +96,8 @@ class ChatCompletionClientBase(AIServiceClientBase, ABC):
             chat_history (ChatHistory): A list of chats in a chat_history object, that can be
                 rendered into messages from system, user, assistant and tools.
             settings (PromptExecutionSettings): Settings for the request.
+            step_prompt (str | None): The prompt to insert after each function call execution.
+            final_prompt (str | None): The prompt to insert after all for loop iterations are completed.
             **kwargs (Any): The optional arguments.
 
         Returns:
@@ -166,11 +170,16 @@ class ChatCompletionClientBase(AIServiceClientBase, ABC):
                     ],
                 )
 
+                if step_prompt:
+                    chat_history.add_user_message(content=step_prompt)
+
                 if any(result.terminate for result in results if result is not None):
                     return merge_function_results(chat_history.messages[-len(results) :])
             else:
                 # Do a final call, without function calling when the max has been reached.
                 self._reset_function_choice_settings(settings)
+                if final_prompt:
+                    chat_history.add_user_message(content=final_prompt)
                 return await self._inner_get_chat_message_contents(chat_history, settings)
 
     async def get_chat_message_content(
